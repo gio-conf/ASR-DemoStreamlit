@@ -1,0 +1,9 @@
+[theme]
+base="light"
+primaryColor="slateBlue"
+baseRadius="full"
+buttonRadius="0.2rem"
+backgroundColor = "#F5FFFF"
+secondaryBackgroundColor="#DDFFFF"
+borderColor="#00CCFF"
+showWidgetBorder=false

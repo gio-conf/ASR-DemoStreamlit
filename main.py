@@ -1,19 +1,10 @@
 import streamlit as st
-import subprocess
 
 ####################################
 # Variables
 ####################################
 if "ctr" not in st.session_state:
     st.session_state["ctr"] = 0
-if "rec" not in st.session_state:
-    st.session_state['rec'] = None
-if "listener" not in st.session_state:
-    st.session_state['listener'] = None
-if "is_running" not in st.session_state:
-    st.session_state['is_running'] = False
-if "is_transcripted" not in st.session_state:
-    st.session_state['is_transcripted'] = False
 if "lang" not in st.session_state:
     st.session_state['lang'] = "Italian"
 AUDIO_DIR = "./user_files"
@@ -51,8 +42,6 @@ def save_file(file):
 # UI
 st.title(""":blue[Transcriptor]""")
 
-
-
 with st.container(
     border=True, height="stretch", width="stretch", horizontal_alignment="center"
 ):
@@ -70,27 +59,8 @@ with st.container(
         st.session_state.is_transcripted = False
     # Mic rec
     else:
-        st.session_state.listener = subprocess.Popen(f'python ../early-exit-transformer/inference_online.py --load_model_dir ../../early-exit-transformer/{st.session_state.lang}-EE-conformer/ --drop_prob 0.0', shell=True)
         audio_batch = st.audio_input("Insert audio", label_visibility="collapsed")
-        st.divider()
-        with st.container(horizontal_alignment="distribute", horizontal=True):
-            with st.container(horizontal_alignment="center"):
-                if (st.button("Start recording")):
-                    # Start the microphone recorder
-                    st.session_state.rec = subprocess.Popen('python ../early-exit-transformer/sender.py', shell=True)
-                    st.session_state.is_running = True
-            with st.container(horizontal_alignment="center"):
-                if (st.button("Stop recording")):
-                    st.write()
-                    if st.session_state.rec is None:
-                        st.warning("Non hai iniziato a parlare")
-                    else:
-                        # Terminate the processes
-                        st.session_state.rec.terminate()
-                        st.session_state.rec = None
-                        st.session_state.is_running = False
-                        # Non mi piace come modifica il layout e come non vada via
-                        # st.success("Conclusione della registrazione")
+        file_to_transcript = audio_batch
 
     st.divider()
 
@@ -120,7 +90,7 @@ with st.container(
 
     st.divider()
 
-    if chosen_mode == "Microfono" and st.session_state.is_running:
+    if chosen_mode == "Microfono" and file_to_transcript is not None:
         st.html("<p>Qua apparira' la trascrizione</p>")
-    elif chosen_mode == "File" and file_to_transcript is not None and st.session_state.is_transcripted == True:
+    elif chosen_mode == "File" and file_to_transcript is not None:
         st.write("Trascrizione")
