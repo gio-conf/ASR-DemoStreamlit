@@ -1,0 +1,25 @@
+[theme.light]
+base = "light"
+primaryColor = "#3a2d97"
+backgroundColor = "#f7fbff"
+secondaryBackgroundColor = "#cde1f3"
+textColor = "#073763"
+borderColor = "#16537e"
+baseRadius = "0.5rem"
+buttonRadius = "0.2rem"
+showWidgetBorder = false
+yellowBackgroundColor = "#ffc107"
+yellowTextColor = "#000000"
+redBackgroundColor = "#dc3545"
+redTextColor = "#ffffff"
+
+
+[theme.light.sidebar]
+base = "light"
+backgroundColor = "#cde1f3"
+primaryColor = "#3a2d97"
+textColor = "#073763"
+borderColor = "#16537e"
+baseRadius = "0.5rem"
+buttonRadius = "0.2rem"
+showWidgetBorder = true
