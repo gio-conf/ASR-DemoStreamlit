@@ -1,0 +1,108 @@
+import os
+import sys
+import re
+from torch import nn, optim
+import torchaudio
+from torchaudio.models.decoder import ctc_decoder
+
+from data import get_infer_data_loader
+from models.model.early_exit import Early_conformer, full_conformer, Early_zipformer, Splitformer
+from util.beam_infer import BeamInference
+from util.conf import get_args
+from util.data_loader import text_transform
+from util.epoch_timer import epoch_time
+from util.model_utils import *
+from util.tokenizer import *
+import torchaudio.transforms as T
+import torch.nn.functional as F
+
+def spec_transform(waveform, args):
+    spec_t = T.Spectrogram(n_fft=args.n_fft * 2, hop_length=args.hop_length, win_length=args.win_length)
+    return spec_t(waveform)
+
+def melspec_transform(waveform, args):
+    melspec_t = T.MelScale(sample_rate=args.sample_rate, n_mels=args.n_mels, n_stft=args.n_fft+1)
+    return melspec_t(waveform)
+
+
+
+def handler_online(args, model, valid_len,  inf, dev):
+    #audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+    waveform, sample_rate = torchaudio.load("/stek/corpora/LibriSpeech/test-clean/2961/960/2961-960-0000.flac")
+    spec = spec_transform(waveform, args)  # .to(device)
+    spec = melspec_transform(spec, args).to(dev)
+    valid_len = torch.tensor([spec.size(2)])
+    encoder = model(spec.to(args.device), valid_len)
+
+    transc = None
+    if dev == "cpu":
+        transc = inf.ctc_predict_(encoder[5])
+    if dev == "cuda":        
+        best_combined = inf.ctc_cuda_predict(encoder[5], args.tokens)
+        transc = args.sp.decode(best_combined[0][0].tokens).lower()
+
+    return transc
+
+
+def run(args, model, inf):
+    valid_len = 0
+    dev="cuda" #cuda #cpu
+    transc = handler_online(args, model, valid_len, inf, dev)
+    print(transc)
+    sys.exit()
+    return
+
+
+def main():
+    #
+    #   CONFIG
+    #
+    args = get_args()
+
+    # If model checkpoint path is provided, load it.
+    # (Overrides conf parameters)
+    args.load_model_dir = os.getcwd() + '/English-EE-conformer'
+    path = args.load_model_dir + "/english-EE-conformer"
+    args.batch_size=1
+    args.bpe_model=args.load_model_dir + "/bpe-256.model"
+    args.bpe_lexicon=args.load_model_dir + "/bpe-256.lex"
+    args.bpe_tokens=args.load_model_dir + "/bpe-256.tok"
+    # Parse config from command line arguments
+
+    # Define model
+
+    model = Early_conformer(src_pad_idx=args.src_pad_idx,
+                                    n_enc_exits=args.n_enc_exits,
+                                    d_model=args.d_model,
+                                    enc_voc_size=args.enc_voc_size,
+                                    dec_voc_size=args.dec_voc_size,
+                                    max_len=args.max_len,
+                                    d_feed_forward=args.d_feed_forward,
+                                    n_head=args.n_heads,
+                                    n_enc_layers=args.n_enc_layers_per_exit,
+                                    features_length=args.n_mels,
+                                    drop_prob=args.drop_prob,
+                                    depthwise_kernel_size=args.depthwise_kernel_size,
+                                    device=args.device).to(args.device)
+            
+    model.load_state_dict(torch.load(path, map_location=args.device))
+
+    
+    model.eval()
+
+    print(f'The model has {count_parameters(model):,} trainable parameters')
+    # print("batch_size:", batch_size, " num_heads:", n_heads, " num_encoder_layers:",
+    #     n_enc_layers, "vocab_size:", dec_voc_size, "DEVICE:", device)
+
+    torch.multiprocessing.set_start_method('spawn')
+    torch.set_num_threads(args.n_threads)
+
+    # Used to access various inference functions, see util/beam_infer
+    inf = BeamInference(args=args)
+
+
+    run(model=model, args=args, inf=inf)
+
+
+if __name__ == '__main__':
+    main()
