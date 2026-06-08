@@ -81,76 +81,82 @@ def sender_worker(audio_queue):
     session_id = None
     f = None
     while True:
-        data = audio_queue.get()
-        if isinstance(data, str) and data == SENTINEL:
-            print("sentinel recv")
-            if f is not None:
-                f.close()
-                f = None
-            print("stopped sending")
-            files = {
-                "file" : (
-                    "microfono.lastpart",
-                    bytes(),
-                    "application/octet-stream",
+        try:
+            data = audio_queue.get()
+            if isinstance(data, str) and data == SENTINEL:
+                print("sentinel recv")
+                if f is not None:
+                    f.close()
+                    f = None
+                print("stopped sending")
+                files = {
+                    "file" : (
+                        "microfono.lastpart",
+                        bytes(),
+                        "application/octet-stream",
+                    )
+                }
+
+                params = {}
+
+                if session_id:
+                    params["session_id"] = session_id
+                    params['final'] = True
+
+                response = requests.post(
+                    URL,
+                    files=files,
+                    data=params,
                 )
-            }
 
-            params = {}
+                resp_json = response.json()
+                session_id = resp_json["session_id"]
+                if resp_json["text"]:
+                    update_queue.put(resp_json)
 
-            if session_id:
-                params["session_id"] = session_id
-                params['final'] = True
+                session_id = str(int(session_id) + 1)
+                continue
 
-            response = requests.post(
-                URL,
-                files=files,
-                data=params,
-            )
+            audio_16 = data
 
-            resp_json = response.json()
-            session_id = resp_json["session_id"]
-            if resp_json["text"]:
-                update_queue.put(resp_json)
+            is_speech = vad.is_speech(audio_16, 16000)
+
+            raw_data = audio_16.tobytes()
+
+            buf.extend(raw_data)
+
+            if is_speech and len(buf) >= 16000:
+
+                files = {
+                    "file": (
+                        "microfono.part0",
+                        buf,
+                        "application/octet-stream",
+                    )
+                }
+
+                params = {}
+
+                if session_id:
+                    params["session_id"] = session_id
+
+                params['final'] = False
+
+                response = requests.post(
+                    URL,
+                    files=files,
+                    data=params,
+                )
+
+                resp_json = response.json()
+                session_id = resp_json["session_id"]
+                # TODO improve readability
+                if resp_json["text"][0] and resp_json["text"][1] and resp_json["text"][2] and resp_json["text"][3] and resp_json["text"][4] and resp_json["text"][5]:
+                    update_queue.put(resp_json)
+
+                buf = bytearray()
+        except queue.Empty:
             continue
-
-        audio_16 = data
-
-        is_speech = vad.is_speech(audio_16, 16000)
-
-        raw_data = audio_16.tobytes()
-
-        buf.extend(raw_data)
-
-        if is_speech and len(buf) >= 16000:
-
-            files = {
-                "file": (
-                    "microfono.part0",
-                    buf,
-                    "application/octet-stream",
-                )
-            }
-
-            params = {}
-
-            if session_id:
-                params["session_id"] = session_id
-
-            params['final'] = False
-
-            response = requests.post(
-                URL,
-                files=files,
-                data=params,
-            )
-
-            resp_json = response.json()
-            session_id = resp_json["session_id"]
-            if resp_json["text"]:
-                update_queue.put(resp_json)
-
-            buf = bytearray()
 
 if "worker_thread" not in st.session_state:
     print("starting new thread")
@@ -212,18 +218,24 @@ with mic_rt_tab:
                 with st.popover("Settings"):
                     st.write("WIP")
                     # Scelta del linguaggio
-                    # st.session_state.lang = st.selectbox("Seleziona lingua", key="mic_rt_chosen_lang", options=["Italian", "English"])
+                    st.session_state.lang = st.selectbox("Seleziona lingua", key="mic_rt_chosen_lang", options=["Italian", "English"])
 
                     # Scelta della task
-                    # task_scelta = st.radio("Seleziona Task", key="mic_rt_chosen_task", options=["ASR"])
+                    task_scelta = st.radio("Seleziona Task", key="mic_rt_chosen_task", options=["ASR"])
 
                     # Scelta dell'uscita
-                    # st.session_state.exit = st.selectbox(
-                    #     "Scegli l'uscita", key="mic_rt_chosen_exit", options=["All", "1", "2", "3", "4", "5", "6"]
-                    # )
+                    st.session_state.exit = st.selectbox(
+                        "Scegli l'uscita", key="mic_rt_chosen_exit", options=["All", "1", "2", "3", "4", "5", "6"]
+                    )
 
             st.divider()
-            history_box = st.empty()
+            history_box1 = st.empty()
+            history_box2 = st.empty()
+            history_box3 = st.empty()
+            history_box4 = st.empty()
+            history_box5 = st.empty()
+            history_box6 = st.empty()
+            
 
             transcript = ""
 
@@ -235,7 +247,12 @@ with mic_rt_tab:
                         text = resp_json.get("text", "")
                         if text:
                             transcript = text
-                            history_box.write(transcript)
+                            history_box1.write(transcript[0])
+                            history_box2.write(transcript[1])
+                            history_box3.write(transcript[2])
+                            history_box4.write(transcript[3])
+                            history_box5.write(transcript[4])
+                            history_box6.write(transcript[5])
                             st.session_state['realtime_content'] = transcript
                 except queue.Empty:
                     pass
@@ -252,7 +269,11 @@ with mic_rt_tab:
             if st.session_state['finished']:
                 try:
                     st.session_state['realtime_content'] = update_queue.get()['text']
-                    st.write(st.session_state['realtime_content'])
+                    if st.session_state.exit == 'All':
+                        for i in range(6):
+                            st.write(f'Exit {i+1}: {st.session_state.realtime_content[i]}')
+                    else:
+                        st.write(f'Exit {st.session_state.exit}: {st.session_state.realtime_content[int(st.session_state.exit)]}')
                 except queue.Empty:
                     pass
 
