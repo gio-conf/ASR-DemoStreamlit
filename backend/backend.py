@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, WebSocket
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -102,6 +102,24 @@ async def handle_chunk(file: Annotated[bytes, File()], session_id: str | None = 
         print(f'{transc=}')
 
     return {"text": transc, 'session_id': session_id}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    global session_cnt
+    
+    # Da rivedere
+    s = sessions.get(1)
+    if s is None:
+        s = Session()
+        session_cnt += 1
+        session_id = str(session_cnt)
+        sessions[session_id] = s
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_bytes()
+        # keep handler unchanged; await its result and unpack
+        transc, s.buffer = handler(args, model, valid_len, inf, dev, data=data, buffer=s.buffer, final=False)
+        await websocket.send_text(transc)
 
 async def load_model(args):
     global inf, valid_len, dev, model

@@ -8,6 +8,8 @@ import threading
 import numpy as np
 import time
 from scipy.signal import resample
+from websockets.sync.client import connect
+import datetime
 
 ####################################
 # Variables
@@ -77,80 +79,40 @@ def on_audio_ended():
 def sender_worker(audio_queue):
     buf = bytearray()
     vad = webrtcvad.Vad(2)
-    URL = "http://127.0.0.1:8000/chunks/"
-    session_id = None
-    f = None
-    while True:
-        data = audio_queue.get()
-        if isinstance(data, str) and data == SENTINEL:
-            print("sentinel recv")
-            if f is not None:
-                f.close()
-                f = None
-            print("stopped sending")
-            files = {
-                "file" : (
-                    "microfono.lastpart",
-                    bytes(),
-                    "application/octet-stream",
-                )
-            }
+    # f = open("out.raw", 'wb')
+    with connect("ws://127.0.0.1:8000/ws") as websocket:
+        while True:
+            try:
+                data = audio_queue.get()
+                if isinstance(data, str) and data == SENTINEL:
+                    print("sentinel recv")
+                    print("stopped sending")
+                    # f.flush()
+                    # f.close()
+                    # f = None
+                    continue
+                else:
+                    # Debug audio
+                    # if f is None:
+                    #     f = open("out.raw", 'wb')
+                    
+                    audio_16 = data
 
-            params = {}
+                    is_speech = vad.is_speech(audio_16, 16000)
 
-            if session_id:
-                params["session_id"] = session_id
-                params['final'] = True
+                    raw_data = audio_16.tobytes()
 
-            response = requests.post(
-                URL,
-                files=files,
-                data=params,
-            )
+                    buf.extend(raw_data)
 
-            resp_json = response.json()
-            session_id = resp_json["session_id"]
-            if resp_json["text"]:
-                update_queue.put(resp_json)
-            continue
-
-        audio_16 = data
-
-        is_speech = vad.is_speech(audio_16, 16000)
-
-        raw_data = audio_16.tobytes()
-
-        buf.extend(raw_data)
-
-        if is_speech and len(buf) >= 16000:
-
-            files = {
-                "file": (
-                    "microfono.part0",
-                    buf,
-                    "application/octet-stream",
-                )
-            }
-
-            params = {}
-
-            if session_id:
-                params["session_id"] = session_id
-
-            params['final'] = False
-
-            response = requests.post(
-                URL,
-                files=files,
-                data=params,
-            )
-
-            resp_json = response.json()
-            session_id = resp_json["session_id"]
-            if resp_json["text"]:
-                update_queue.put(resp_json)
-
-            buf = bytearray()
+                    if is_speech and len(buf) >= 16000:
+                        # f.write(buf)
+                        print(f'{datetime.datetime.now()=}')
+                        websocket.send(buf)
+                        message = websocket.recv()
+                        update_queue.put_nowait(message)
+                        buf = bytearray()
+            except queue.Empty:
+                continue
 
 if "worker_thread" not in st.session_state:
     print("starting new thread")
@@ -232,7 +194,7 @@ with mic_rt_tab:
                 try:
                     while True:
                         resp_json = update_queue.get_nowait()
-                        text = resp_json.get("text", "")
+                        text = resp_json
                         if text:
                             transcript = text
                             history_box.write(transcript)
@@ -251,7 +213,6 @@ with mic_rt_tab:
 
             if st.session_state['finished']:
                 try:
-                    st.session_state['realtime_content'] = update_queue.get()['text']
                     st.write(st.session_state['realtime_content'])
                 except queue.Empty:
                     pass
