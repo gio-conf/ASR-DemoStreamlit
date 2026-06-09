@@ -41,10 +41,22 @@ UPLOAD_DIR = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global model_loaded
     global UPLOAD_DIR
+    global it_model, it_args, it_inf, it_valid_len, it_dev
+    global en_model, en_args, en_inf, en_valid_len, en_dev
     print("App is starting...")
     UPLOAD_DIR = Path("uploads")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    it_args = get_args([], "Italian")
+    it_model, it_inf, it_valid_len, it_dev = await load_model(it_args)
+    print("IT-model loaded")
+
+    en_args = get_args([], "English")
+    en_model, en_inf, en_valid_len, en_dev = await load_model(en_args)
+    print("EN-model loaded")
+    model_loaded = True
     yield
     print("App is shutting down...")
     if UPLOAD_DIR.exists():
@@ -58,16 +70,35 @@ async def lifespan(app: FastAPI):
                 pass
 
 app = FastAPI(lifespan=lifespan)
-args = []
+model_loaded: bool = False
+it_model = None
+it_args = []
+it_inf = None
+it_valid_len = None
+it_dev = None
+en_model = None
+en_args = []
+en_inf = None
+en_valid_len = None
+en_dev = None
+
+@app.get("/model_info")
+def get_model_info():
+    return {"state": model_loaded}
 
 @app.post("/uploads/")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), lang: str = Form("Italian")):
     dest = UPLOAD_DIR / file.filename
     with dest.open("wb") as out_file:
         while content := await file.read(1024*1024):
             out_file.write(content)
     await file.close()
-    transc = handler_batch(args, model, valid_len, inf, dev, f"uploads/{file.filename}")
+    if lang == "Italian":
+        print("Italian transcription")
+        transc = handler_batch(it_args, it_model, it_valid_len, it_inf, it_dev, f"uploads/{file.filename}")
+    else:
+        print("English transcription")
+        transc = handler_batch(en_args, en_model, en_valid_len, en_inf, en_dev, f"uploads/{file.filename}")
     return {'text': transc}
 
 @app.post("/set_model/")
@@ -122,7 +153,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text(transc)
 
 async def load_model(args):
-    global inf, valid_len, dev, model
+    global inf, valid_len, dev
     # If model checkpoint path is provided, load it.
     # (Overrides conf parameters)
 
@@ -169,7 +200,7 @@ async def load_model(args):
     valid_len = 0
     dev = args.device
 
-    return True
+    return model, inf, valid_len, dev
 
 
 # @app.post("/files/")
