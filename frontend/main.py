@@ -26,6 +26,7 @@ class SharedConfig:
             return self._target_length_ms
 
 
+# TO FIX, streamlit reruns the script everytime the user touches anything, so buf length is always 500ms
 config = SharedConfig()
 
 ####################################
@@ -49,6 +50,8 @@ if "model_loaded" not in st.session_state:
     st.session_state["model_loaded"] = None
 if "audio_started" not in st.session_state:
     st.session_state["audio_started"] = False
+if "done" not in st.session_state:
+    st.session_state["done"] = False
 
 AUDIO_DIR = "user_files/"
 file_to_transcript = ""
@@ -77,7 +80,7 @@ audio_queue = get_audio_queue()
 finish_queue = get_finish_queue()
 
 if "finished" not in st.session_state:
-    st.session_state["finished"] = False
+    st.session_state["finished"] = None
 
 vad = webrtcvad.Vad(2)
 
@@ -113,7 +116,6 @@ def sender_worker(audio_queue):
     f = None
     while True:
         try:
-            print(f"{audio_queue.qsize()=}")
             data = audio_queue.get()
 
             target_ms = config.get_target_length()
@@ -283,7 +285,7 @@ with mic_rt_tab:
                     st.session_state.exit = st.selectbox(
                         "Scegli l'uscita",
                         key="mic_rt_chosen_exit",
-                        options=["All", "1", "2", "3", "4", "5", "6"],
+                        options=["1", "2", "3", "4", "5", "6"],
                     )
 
             st.divider()
@@ -293,42 +295,52 @@ with mic_rt_tab:
 
             if ctx.state.playing and not st.session_state["audio_started"]:
                 st.session_state["audio_started"] = True
+                st.session_state["done"] = False
                 resp = requests.post(
                     "http://127.0.0.1:8000/model_specs/",
                     data={"lang": st.session_state.lang},
+                )
+                r = requests.post(
+                    "http://127.0.0.1:8000/set_exit/",
+                    data={"new_exit": int(st.session_state.exit) - 1},
                 )
 
             poll_interval = 0.2
             while ctx.state.playing:
                 try:
-                    while True:
-                        resp_json = update_queue.get_nowait()
-                        text = resp_json.get("text", "")
-                        if text:
-                            transcript = text
-                            history_box1.write(transcript)
-                            st.session_state["realtime_content"] = transcript
+                    resp_json = update_queue.get_nowait()
+                    text = resp_json.get("text", "")
+                    if text:
+                        transcript = text
+                        history_box1.write(transcript)
+                        st.session_state["realtime_content"] = transcript
                 except queue.Empty:
-                    pass
+                    history_box1.write(transcript)
 
                 time.sleep(poll_interval)
 
             st.divider()
 
-            try:
-                st.session_state["finished"] = finish_queue.get_nowait()
-            except queue.Empty:
-                pass
-
-            if st.session_state["finished"]:
+            if st.session_state.finished is None:
                 try:
+                    st.session_state["finished"] = finish_queue.get_nowait()
+                    st.session_state["audio_started"] = not st.session_state["finished"]
+                except queue.Empty:
+                    st.session_state["finished"] = None
+                    st.session_state.done = False
+
+            if st.session_state["finished"] and not st.session_state.done:
+                try:
+                    st.session_state.done = st.session_state["finished"]
                     st.session_state["realtime_content"] = update_queue.get()["text"]
                     st.write(
                         f"Exit {st.session_state.exit}: {st.session_state.realtime_content}"
                     )
-                    st.session_state["realtime_content"] = None
+                    st.session_state["audio_started"] = False
                 except queue.Empty:
-                    pass
+                    st.write(
+                        f"Exit {st.session_state.exit}: {st.session_state.realtime_content}"
+                    )
 
         else:
             st.warning("Load model from sidebar")
