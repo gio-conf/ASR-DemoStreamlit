@@ -113,7 +113,7 @@ def sender_worker(audio_queue):
                 data = audio_queue.get()
 
                 target_ms = config.get_target_length()
-                target_len = int((target_ms / 20) * 640)
+                target_len = int((target_ms / 1000) * 16000)
                 if isinstance(data, str) and data == SENTINEL:
                     websocket.send(data)
                     msg = websocket.recv()
