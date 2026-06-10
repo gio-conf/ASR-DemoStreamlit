@@ -155,6 +155,14 @@ class Session:
 sessions = {}
 session_cnt = 0
 
+exit = None
+
+
+@app.post("/set_exit/")
+def set_exit(new_exit: int = Form(5)):
+    global exit
+    exit = new_exit
+
 
 @app.post("/chunks/")
 async def handle_chunk(
@@ -163,7 +171,7 @@ async def handle_chunk(
     final: bool | None = Form(None),
     lang: str = Form("Italian"),
 ):
-    global session_cnt
+    global session_cnt, exit
     m = models[lang]
 
     s = sessions.get(session_id)
@@ -185,6 +193,7 @@ async def handle_chunk(
         data=file,
         buffer=s.buffer,
         final=final,
+        exit=exit,
     )
 
     t1 = time.perf_counter()
@@ -224,6 +233,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     data=None,
                     buffer=s.buffer,
                     final=True,
+                    exit=exit,
                 )
                 print(f"{s.buffer=}")
                 await websocket.send_text(transc)

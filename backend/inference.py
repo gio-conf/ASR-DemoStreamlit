@@ -201,7 +201,14 @@ speech_detected = False
 count_silent_frames = 0
 
 
-def handler(args, model, valid_len, inf, dev, data: bytes, buffer, final: bool):
+def handler(
+    args, model, valid_len, inf, dev, data: bytes, buffer, final: bool, exit: int
+):
+    exit = max(0, exit)
+    exit = min(5, exit)
+
+    print(f"{exit=}")
+
     # CPU MODE ONLY
     global speech_detected
     global count_silent_frames
@@ -228,7 +235,7 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer, final: bool):
             # 3) encoder sul chunk
             valid_len = torch.tensor([spec.size(2)])
             encoder = model(spec, valid_len)
-            enc = encoder[5]  # (B, T_enc, D)
+            enc = encoder[exit]  # (B, T_enc, D)
 
             enc_central = enc[:, LB_e : LB_e + CK_e, :]
 
@@ -255,7 +262,7 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer, final: bool):
         valid_len = torch.tensor([spec.size(2)])
 
         encoder = model(spec, valid_len)
-        enc = encoder[5]  # (B, T_enc, D)
+        enc = encoder[exit]  # (B, T_enc, D)
 
         enc_central = enc[:, LB_e : LB_e + CK_e, :]
         # 5) decodifica
