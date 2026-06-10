@@ -1,3 +1,11 @@
 streamlit==1.57.0
 streamlit-webrtc==0.70.0
 fastapi[standard]
+torch>=2.2,<2.5
+torchaudio>=2.2,<2.5
+sentencepiece>=0.1.99
+editdistance>=0.8.1
+tensorboard>=2.14
+flashlight-text
+webrtcvad
+scipy
