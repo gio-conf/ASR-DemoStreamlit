@@ -1,16 +1,26 @@
+import argparse
+import io
 import os
-import sys
 import re
-from torch import nn, optim
+import socket
+import struct
+import sys
+import time
+from collections import deque
+
+import numpy as np
+import torch.nn.functional as F
 import torchaudio
+import torchaudio.transforms as T
+from torch import nn, optim
 from torchaudio.models.decoder import ctc_decoder
 
 from data import get_infer_data_loader
 from models.model.early_exit import (
     Early_conformer,
-    full_conformer,
     Early_zipformer,
     Splitformer,
+    full_conformer,
 )
 from util.beam_infer import BeamInference
 from util.conf import get_args
@@ -18,15 +28,6 @@ from util.data_loader import text_transform
 from util.epoch_timer import epoch_time
 from util.model_utils import *
 from util.tokenizer import *
-import torchaudio.transforms as T
-import torch.nn.functional as F
-import argparse
-import numpy as np
-import socket
-import struct
-import time
-from collections import deque
-import io
 
 
 def spec_transform(waveform, args):
@@ -73,6 +74,7 @@ FRAME_TIMEOUT = SEGMENT_TIMEOUT / FRAME_MS
 # MODELLO E DECODER (DA INTEGRARE)
 #############################################
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"{device=}")
 
 # Esempio: da sostituire con il tuo codice
 # model = load_model(args).to(device).eval()
@@ -84,6 +86,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 _last_len = 0
+
 
 def print_live_caption(partial):
     global _last_len
@@ -193,11 +196,15 @@ LB_e = int(LOOKBEHIND_SEC * EMB_PS)
 CK_e = int(CHUNK_SEC * EMB_PS)
 
 
-
 # buffer = np.zeros(0, dtype=np.float32)
+speech_detected = False
+count_silent_frames = 0
 
-def handler(args, model, valid_len, inf, dev, data: bytes, buffer):
-    # global buffer
+
+def handler(args, model, valid_len, inf, dev, data: bytes, buffer, final: bool):
+    # CPU MODE ONLY
+    global speech_detected
+    global count_silent_frames
 
     pcm_buffer = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -205,8 +212,40 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer):
 
     final_text = ""
 
+    if final:
+        print("Final flush")
+        win, buffer = build_window_from_buffer(buffer, final_flush=True)
+        if win is None:
+            transc = inf.stream_decoder(partial=False)
+            print(f"{transc=}")
+            return normalize_output(transc), np.zeros(0, dtype=np.float32)
+        wav = torch.from_numpy(win).unsqueeze(0)  # (1, T)
+        if wav.size(1) > int(SAMPLE_RATE / 10):  # remain wav length greater than 100ms
+            # print("\nCOUNT_SILENCE:", count_silent_frames, wav.size(1))
+            spec = spec_transform(wav, args)
+            spec = melspec_transform(spec, args).to(dev)
+
+            # 3) encoder sul chunk
+            valid_len = torch.tensor([spec.size(2)])
+            encoder = model(spec, valid_len)
+            enc = encoder[5]  # (B, T_enc, D)
+
+            enc_central = enc[:, LB_e : LB_e + CK_e, :]
+
+            final_text += normalize_output(
+                inf.stream_decoder(emission=enc_central, partial=True)
+            )
+
+        inf.stream_decoder(partial=False)
+        return final_text, np.zeros(0, dtype=np.float32)
+
     while len(buffer) >= (LB + CK + LA):
         win, buffer = build_window_from_buffer(buffer, final_flush=False)
+
+        if win is None:
+            continue
+
+        speech_detected = True
 
         wav = torch.from_numpy(win).unsqueeze(0)
 
@@ -216,16 +255,15 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer):
         valid_len = torch.tensor([spec.size(2)])
 
         encoder = model(spec, valid_len)
-        enc = encoder[5]
+        enc = encoder[5]  # (B, T_enc, D)
 
-        B, T_full, D = enc.shape
         enc_central = enc[:, LB_e : LB_e + CK_e, :]
+        # 5) decodifica
+        final_text += normalize_output(
+            inf.stream_decoder(emission=enc_central, partial=True)
+        )
 
-        transc = inf.stream_decoder(emission=enc_central, partial=True)
-
-        final_text += normalize_output(transc)
-
-    return normalize_output(final_text), buffer
+    return final_text, buffer
 
     """
     spec = spec_transform(waveform, args)  # .to(device)
@@ -234,15 +272,15 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer):
     encoder = model(spec.to(args.device), valid_len)
 
     transc = None
-    
+
     if dev == "cpu":
         transc = inf.ctc_predict_(encoder[5])
         #transc = inf.stream_decoder(encoder[5])
         #print("Parziale:", " ".join(transc), end="\r")
 
         #print("Finale:", self.s_decoder.finalize())
-        
-    if dev == "cuda":        
+
+    if dev == "cuda":
         best_combined = inf.ctc_cuda_predict(encoder[5], args.tokens)
         transc = args.sp.decode(best_combined[0][0].tokens).lower()
 
@@ -251,7 +289,6 @@ def handler(args, model, valid_len, inf, dev, data: bytes, buffer):
 
 
 def run(args, model, inf):
-
     valid_len = 0
     dev = args.device  # cuda #cpu
     transc = handler(args, model, valid_len, inf, dev, data=bytes(0))

@@ -1,14 +1,20 @@
-from fastapi import FastAPI, File, UploadFile, Form, WebSocket
-from pathlib import Path
-from contextlib import asynccontextmanager
-from typing import Annotated
 import shutil
-from inference_online import handler_batch
-from inference import handler
-from torch import nn, optim
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Annotated
+
+import numpy as np
+import torch.nn.functional as F
 import torchaudio
+import torchaudio.transforms as T
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket
+from torch import nn, optim
 from torchaudio.models.decoder import ctc_decoder
+
 from data import get_infer_data_loader
+from inference import handler
+from inference_online import handler_batch
 from models.model.early_exit import Early_conformer
 from util.beam_infer import BeamInference
 from util.conf import get_args
@@ -16,9 +22,7 @@ from util.data_loader import text_transform
 from util.epoch_timer import epoch_time
 from util.model_utils import *
 from util.tokenizer import *
-import torchaudio.transforms as T
-import torch.nn.functional as F
-import numpy as np
+
 
 def load_audio(audio_bytes, target_sr=16000):
 
@@ -37,26 +41,46 @@ def load_audio(audio_bytes, target_sr=16000):
     # ritorna buffer bytes
     return audio_int16.tobytes()
 
+
 UPLOAD_DIR = None
+
+
+class Model:
+    def __init__(self, args, model, inf, valid_len, dev):
+        self.args = args
+        self.model = model
+        self.inf = inf
+        self.valid_len = valid_len
+        self.dev = dev
+
+
+langs = {
+    "it": "Italian",
+    "en": "English",
+}
+
+
+models = {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model_loaded
     global UPLOAD_DIR
-    global it_model, it_args, it_inf, it_valid_len, it_dev
-    global en_model, en_args, en_inf, en_valid_len, en_dev
     print("App is starting...")
     UPLOAD_DIR = Path("uploads")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    it_args = get_args([], "Italian")
-    it_model, it_inf, it_valid_len, it_dev = await load_model(it_args)
-    print("IT-model loaded")
+    for lang in ["it", "en"]:
+        args = get_args([], "Italian")
+        model, inf, valid_len, dev = await load_model(args)
+        print(f"{lang}-model loaded")
+        models[lang] = Model(args, model, inf, valid_len, dev)
 
-    en_args = get_args([], "English")
-    en_model, en_inf, en_valid_len, en_dev = await load_model(en_args)
-    print("EN-model loaded")
+    models["rt"] = models["it"]
+
     model_loaded = True
+
     yield
     print("App is shutting down...")
     if UPLOAD_DIR.exists():
@@ -69,91 +93,160 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
+
 app = FastAPI(lifespan=lifespan)
 model_loaded: bool = False
-it_model = None
-it_args = []
-it_inf = None
-it_valid_len = None
-it_dev = None
-en_model = None
-en_args = []
-en_inf = None
-en_valid_len = None
-en_dev = None
+
 
 @app.get("/model_info")
 def get_model_info():
     return {"state": model_loaded}
 
+
 @app.post("/uploads/")
 async def upload(file: UploadFile = File(...), lang: str = Form("Italian")):
     dest = UPLOAD_DIR / file.filename
     with dest.open("wb") as out_file:
-        while content := await file.read(1024*1024):
+        while content := await file.read(1024 * 1024):
             out_file.write(content)
     await file.close()
-    if lang == "Italian":
-        print("Italian transcription")
-        transc = handler_batch(it_args, it_model, it_valid_len, it_inf, it_dev, f"uploads/{file.filename}")
-    else:
-        print("English transcription")
-        transc = handler_batch(en_args, en_model, en_valid_len, en_inf, en_dev, f"uploads/{file.filename}")
-    return {'text': transc}
+    m = models[lang]
+
+    # print(m.args, m.model, m.valid_len, m.inf, m.dev)
+
+    t0 = time.perf_counter()
+    transc = handler_batch(
+        m.args, m.model, m.valid_len, m.inf, m.dev, f"uploads/{file.filename}"
+    )
+    t1 = time.perf_counter()
+
+    print(f"{transc=}")
+
+    print(f"{(t1-t0)=}")
+    return {"text": transc}
+
 
 @app.post("/set_model/")
 async def set_model(lang: str = Form("Italian")):
     global args
     args = get_args([], lang.capitalize())
     await load_model(args)
-    return {'lang': lang}
+    return {"lang": lang}
+
+
+@app.post("/model_specs/")
+async def model_specs(lang: str = Form("Italian")):
+    global rt_model, rt_args, rt_valid_len, rt_inf, rt_dev
+    m = models[lang]
+    rt_args, rt_model, rt_inf, rt_valid_len, rt_dev = (
+        m.args,
+        m.model,
+        m.inf,
+        m.valid_len,
+        m.dev,
+    )
+
 
 class Session:
     def __init__(self):
         self.buffer = np.zeros(0, dtype=np.float32)
 
+
 sessions = {}
 session_cnt = 0
 
+
 @app.post("/chunks/")
-async def handle_chunk(file: Annotated[bytes, File()], session_id: str | None = Form(None)): 
+async def handle_chunk(
+    file: Annotated[bytes, File()],
+    session_id: str | None = Form(None),
+    final: bool | None = Form(None),
+    lang: str = Form("Italian"),
+):
     global session_cnt
-    
+    m = models[lang]
+
     s = sessions.get(session_id)
-    print(f'{session_id=}')
     if s is None:
         s = Session()
         session_cnt += 1
         session_id = str(session_cnt)
         sessions[session_id] = s
+        print(f"{session_id=}")
 
-    transc, s.buffer = handler(args, model, valid_len, inf, dev, data=file, buffer=s.buffer)
+    t0 = time.perf_counter()
 
-    if transc != "":
-        print(f'{transc=}')
+    transc, s.buffer = handler(
+        m.args,
+        m.model,
+        m.valid_len,
+        m.inf,
+        m.dev,
+        data=file,
+        buffer=s.buffer,
+        final=final,
+    )
 
-    return {"text": transc, 'session_id': session_id}
+    t1 = time.perf_counter()
+
+    print(f"{(t1-t0)=}")
+
+    return {"text": transc, "session_id": session_id}
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global session_cnt
-    
-    # Da rivedere
-    s = sessions.get(1)
+    global rt_args, rt_model, rt_valid_len, rt_inf, rt_dev
+
+    s = sessions.get(str(session_cnt + 1))
     if s is None:
         s = Session()
         session_cnt += 1
         session_id = str(session_cnt)
         sessions[session_id] = s
+
     await websocket.accept()
+    # TO FIX for multiple stop/start sessions
     while True:
-        data = await websocket.receive_bytes()
-        # keep handler unchanged; await its result and unpack
-        transc, s.buffer = handler(args, model, valid_len, inf, dev, data=data, buffer=s.buffer, final=False)
-        await websocket.send_text(transc)
+        message = await websocket.receive()
+
+        if "text" in message and message["text"] is not None:
+            text = message["text"]
+
+            if text == "SENTINEL":
+                transc, s.buffer = handler(
+                    rt_args,
+                    rt_model,
+                    rt_valid_len,
+                    rt_inf,
+                    rt_dev,
+                    data=None,
+                    buffer=s.buffer,
+                    final=True,
+                )
+                print(f"{s.buffer=}")
+                await websocket.send_text(transc)
+                break
+
+        elif "bytes" in message and message["bytes"] is not None:
+            audio = message["bytes"]
+
+            transc, s.buffer = handler(
+                rt_args,
+                rt_model,
+                rt_valid_len,
+                rt_inf,
+                rt_dev,
+                data=audio,
+                buffer=s.buffer,
+                final=False,
+            )
+
+            await websocket.send_text(transc)
+
 
 async def load_model(args):
-    global inf, valid_len, dev
     # If model checkpoint path is provided, load it.
     # (Overrides conf parameters)
 
@@ -164,7 +257,7 @@ async def load_model(args):
 
     if lang == "it":
         args.load_model_dir = os.getcwd() + '/Italian-EE-conformer'
-        args.load_model_path = args.load_model_dir + "/italian-EE-conformer"    """
+        args.load_model_path = args.load_model_dir + "/italian-EE-conformer" """
 
     args.batch_size = 1
     args.device = "cpu"
@@ -210,6 +303,7 @@ async def load_model(args):
 
 #     return {"text": transc}
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app)
