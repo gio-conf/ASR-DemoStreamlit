@@ -214,6 +214,10 @@ st.markdown(
         text-align: center;
         text-transform: uppercase;
     }
+
+    p {
+        text-align: center;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -501,4 +505,6 @@ with mic_file_tab:
             st.warning("Load model from sidebar")
 
 
-# st.caption("Made by Giovanni Confente Broll Avila")
+# Credits
+# with st.container(horizontal_alignment="center"):
+#     st.html("<p>Made by Giovanni Confente Broll Avila</p>")
