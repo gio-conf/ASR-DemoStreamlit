@@ -17,3 +17,6 @@ Advice: I developed this is a virtual enviroment with python 3.11.14.
 - In the first terminal, get inside of the backend directory and launch the backend server with ```python backend.py```
 - After both models are loaded and the server is ready. Launch the UI with ```streamlit run ./frontend/main.py```
 
+## N.B.
+There is an error with streamlit-webrtc. So before running, Modify the shutdown.py file in ```.venv/lib/python3.11/site-packages/streamlit_webrtc/``` line 126.
+Change it from ```if self._polling_thread.is_alive():``` to ```if self._polling_thread is not None and self._polling_thread.is_alive():```.
