@@ -12,9 +12,6 @@ import numpy as np
 import torch.nn.functional as F
 import torchaudio
 import torchaudio.transforms as T
-from torch import nn, optim
-from torchaudio.models.decoder import ctc_decoder
-
 from data import get_infer_data_loader
 from models.model.early_exit import (
     Early_conformer,
@@ -22,6 +19,9 @@ from models.model.early_exit import (
     Splitformer,
     full_conformer,
 )
+from pandas._libs.lib import i8max
+from torch import nn, optim
+from torchaudio.models.decoder import ctc_decoder
 from util.beam_infer import BeamInference
 from util.conf import get_args
 from util.data_loader import text_transform
@@ -200,12 +200,15 @@ CK_e = int(CHUNK_SEC * EMB_PS)
 speech_detected = False
 count_silent_frames = 0
 
+ALL_EXITS = 99
+
 
 def handler(
     args, model, valid_len, inf, dev, data: bytes, buffer, final: bool, exit: int
 ):
-    exit = max(0, exit)
-    exit = min(5, exit)
+    if exit != ALL_EXITS and (exit < 0 or exit > 5):
+        exit = max(0, exit)
+        exit = min(5, exit)
 
     print(f"{exit=}")
 
@@ -217,7 +220,7 @@ def handler(
 
     buffer = np.concatenate([buffer, pcm_buffer])
 
-    final_text = ""
+    transc = []
 
     if final:
         print("Final flush")
@@ -235,16 +238,18 @@ def handler(
             # 3) encoder sul chunk
             valid_len = torch.tensor([spec.size(2)])
             encoder = model(spec, valid_len)
-            enc = encoder[exit]  # (B, T_enc, D)
-
-            enc_central = enc[:, LB_e : LB_e + CK_e, :]
-
-            final_text += normalize_output(
-                inf.stream_decoder(emission=enc_central, partial=True)
-            )
+            if dev == "cpu":
+                for i in range(len(encoder)):
+                    if exit == i or exit == ALL_EXITS:
+                        transc.append(
+                            {
+                                "exit": i,
+                                "text": normalize_output(inf.ctc_predict_(encoder[i])),
+                            }
+                        )
 
         inf.stream_decoder(partial=False)
-        return final_text, np.zeros(0, dtype=np.float32)
+        return transc, np.zeros(0, dtype=np.float32)
 
     while len(buffer) >= (LB + CK + LA):
         win, buffer = build_window_from_buffer(buffer, final_flush=False)
@@ -262,15 +267,22 @@ def handler(
         valid_len = torch.tensor([spec.size(2)])
 
         encoder = model(spec, valid_len)
-        enc = encoder[exit]  # (B, T_enc, D)
+        if dev == "cpu":
+            for i in range(len(encoder)):
+                if exit == i or exit == ALL_EXITS:
+                    transc.append(
+                        {
+                            "exit": i,
+                            "text": normalize_output(inf.ctc_predict_(encoder[i])),
+                        }
+                    )
 
-        enc_central = enc[:, LB_e : LB_e + CK_e, :]
-        # 5) decodifica
-        final_text += normalize_output(
-            inf.stream_decoder(emission=enc_central, partial=True)
-        )
+        # TODO: cuda with multiple exits
+        if dev == "cuda":
+            best_combined = inf.ctc_cuda_predict(encoder[5], args.tokens)
+            transc = args.sp.decode(best_combined[0][0].tokens).lower()
 
-    return final_text, buffer
+    return transc, buffer
 
     """
     spec = spec_transform(waveform, args)  # .to(device)

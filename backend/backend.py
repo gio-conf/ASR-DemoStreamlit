@@ -58,9 +58,7 @@ langs = {
     "en": "English",
 }
 
-
 models = {}
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -116,9 +114,6 @@ async def upload(
     await file.close()
     m = models[lang]
 
-    # print(m.args, m.model, m.valid_len, m.inf, m.dev)
-
-    t0 = time.perf_counter()
     transc = handler_batch(
         m.args,
         m.model,
@@ -128,21 +123,12 @@ async def upload(
         f"uploads/{file.filename}",
         exit=exit,
     )
-    t1 = time.perf_counter()
 
     return {"result": transc}
 
 
-@app.post("/set_model/")
-async def set_model(lang: str = Form("Italian")):
-    global args
-    args = get_args([], lang.capitalize())
-    await load_model(args)
-    return {"lang": lang}
-
-
 @app.post("/model_specs/")
-async def model_specs(lang: str = Form("Italian")):
+async def model_specs(lang: str = Form("it")):
     global rt_model, rt_args, rt_valid_len, rt_inf, rt_dev
     m = models[lang]
     rt_args, rt_model, rt_inf, rt_valid_len, rt_dev = (
@@ -162,24 +148,17 @@ class Session:
 sessions = {}
 session_cnt = 0
 
-exit = None
-
-
-@app.post("/set_exit/")
-def set_exit(new_exit: int = Form(5)):
-    global exit
-    exit = new_exit
-
-
 @app.post("/chunks/")
 async def handle_chunk(
     file: Annotated[bytes, File()],
     session_id: str | None = Form(None),
     final: bool | None = Form(None),
-    lang: str = Form("Italian"),
+    lang: str = Form("it"),
+    exit: int = Form(5),
 ):
-    global session_cnt, exit
+    global session_cnt
     m = models[lang]
+    
 
     s = sessions.get(session_id)
     if s is None:
@@ -188,8 +167,6 @@ async def handle_chunk(
         session_id = str(session_cnt)
         sessions[session_id] = s
         print(f"{session_id=}")
-
-    t0 = time.perf_counter()
 
     transc, s.buffer = handler(
         m.args,
@@ -203,11 +180,7 @@ async def handle_chunk(
         exit=exit,
     )
 
-    t1 = time.perf_counter()
-
-    print(f"{(t1-t0)=}")
-
-    return {"text": transc, "session_id": session_id}
+    return {"result": transc, "session_id": session_id}
 
 
 @app.websocket("/ws")
