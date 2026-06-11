@@ -8,14 +8,13 @@ import numpy as np
 import torch.nn.functional as F
 import torchaudio
 import torchaudio.transforms as T
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket
-from torch import nn, optim
-from torchaudio.models.decoder import ctc_decoder
-
 from data import get_infer_data_loader
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 from inference import handler
 from inference_online import handler_batch
 from models.model.early_exit import Early_conformer
+from torch import nn, optim
+from torchaudio.models.decoder import ctc_decoder
 from util.beam_infer import BeamInference
 from util.conf import get_args
 from util.data_loader import text_transform
@@ -103,8 +102,13 @@ def get_model_info():
     return {"state": model_loaded}
 
 
+ALL_EXITS = 99
+
+
 @app.post("/uploads/")
-async def upload(file: UploadFile = File(...), lang: str = Form("Italian")):
+async def upload(
+    file: UploadFile = File(...), lang: str = Form("it"), exit: int = Form(5)
+):
     dest = UPLOAD_DIR / file.filename
     with dest.open("wb") as out_file:
         while content := await file.read(1024 * 1024):
@@ -116,14 +120,17 @@ async def upload(file: UploadFile = File(...), lang: str = Form("Italian")):
 
     t0 = time.perf_counter()
     transc = handler_batch(
-        m.args, m.model, m.valid_len, m.inf, m.dev, f"uploads/{file.filename}"
+        m.args,
+        m.model,
+        m.valid_len,
+        m.inf,
+        m.dev,
+        f"uploads/{file.filename}",
+        exit=exit,
     )
     t1 = time.perf_counter()
 
-    print(f"{transc=}")
-
-    print(f"{(t1-t0)=}")
-    return {"text": transc}
+    return {"result": transc}
 
 
 @app.post("/set_model/")

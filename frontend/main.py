@@ -349,92 +349,24 @@ with mic_rt_tab:
         else:
             st.warning("Load model from sidebar")
 
-with file_tab:
+
+def file_tab_fn(mic_mode=False, key=""):
+
     with st.container(
         border=True, height="stretch", width="stretch", horizontal_alignment="center"
     ):
-        if st.session_state["model_loaded"]:
-            # File upload
-            uploaded_file = st.file_uploader(
-                "Upload file",
-                type=[".wav", ".ogg", ".flac"],
-                label_visibility="collapsed",
-            )
+        if True:  # st.session_state["model_loaded"]:
+            if mic_mode:
+                file = st.audio_input(
+                    "Audio", label_visibility="collapsed", sample_rate=16000
+                )
+            else:
+                file = st.file_uploader(
+                    "Upload file",
+                    type=[".wav", ".ogg", ".flac"],
+                    label_visibility="collapsed",
+                )
 
-            st.session_state.is_transcripted = False
-
-            st.divider()
-
-            with st.container(horizontal=True, horizontal_alignment="distribute"):
-                with st.popover("Settings"):
-                    # Scelta del linguaggio
-                    st.session_state.lang = st.selectbox(
-                        "Select language", ["it", "en"]
-                    )
-
-                    # Scelta della task
-                    task_scelta = st.radio("Select Task", ["ASR"])
-
-                    # Scelta dell'uscita
-                    st.session_state.exit = st.selectbox(
-                        "Select exit", options=["All", "1", "2", "3", "4", "5", "6"]
-                    )
-
-                # Si procede a trascrivere
-                with st.container(horizontal_alignment="center", width="content"):
-                    if st.button("Transcribe", type="tertiary"):
-                        file_to_transcript = uploaded_file
-                        file_to_transcript.name = "user_uploaded_file.wav"
-                        if file_to_transcript is not None:
-                            files = {
-                                "file": (
-                                    file_to_transcript.name,
-                                    file_to_transcript,
-                                    "audio/wav",
-                                )
-                            }
-                            try:
-                                params = {}
-                                params["lang"] = st.session_state.lang
-                                resp = requests.post(
-                                    "http://127.0.0.1:8000/uploads",
-                                    files=files,
-                                    data=params,
-                                )
-                                st.session_state["transcripted_text"] = resp.json()[
-                                    "text"
-                                ]
-                                st.session_state.is_transcripted = True
-                            except ConnectionError:
-                                st.error("Server irraggiungibile")
-                        else:
-                            st.error("Nulla da trascrivere")
-
-            st.divider()
-
-            if file_to_transcript is not None and st.session_state.is_transcripted:
-                if st.session_state["exit"] == "All":
-                    for i in range(len(st.session_state["transcripted_text"])):
-                        st.write(
-                            f"Exit {i + 1}: " + st.session_state["transcripted_text"][i]
-                        )
-                else:
-                    chosen_idx = int(st.session_state["exit"]) - 1
-                    st.write(
-                        f"Exit {chosen_idx + 1}: "
-                        + st.session_state["transcripted_text"][chosen_idx]
-                    )
-        else:
-            st.warning("Load model from sidebar")
-
-with mic_file_tab:
-    with st.container(
-        border=True, height="stretch", width="stretch", horizontal_alignment="center"
-    ):
-        if st.session_state["model_loaded"]:
-            file = st.audio_input(
-                "Audio", label_visibility="collapsed", sample_rate=16000
-            )
             st.session_state.is_transcripted = False
 
             st.divider()
@@ -444,26 +376,27 @@ with mic_file_tab:
                     # Scelta del linguaggio
                     st.session_state.lang = st.selectbox(
                         "Select language",
-                        key="mic_file_chosen_lang",
+                        key=f"{key}_file_chosen_lang",
                         options=["it", "en"],
                     )
 
                     # Scelta della task
                     task_scelta = st.radio(
-                        "Select Task", key="mic_lang_chosen_task", options=["ASR"]
+                        "Select Task", key=f"{key}_lang_chosen_task", options=["ASR"]
                     )
 
                     # Scelta dell'uscita
-                    st.session_state.exit = st.selectbox(
+                    exit = st.selectbox(
                         "Select exit",
-                        key="mic_file_chosen_exit",
+                        key=f"{key}_file_chosen_exit",
                         options=["All", "1", "2", "3", "4", "5", "6"],
                     )
+                    st.session_state.exit = int(exit) - 1 if exit != "All" else 99
 
                 # Si procede a trascrivere
                 with st.container(horizontal_alignment="center", width="content"):
                     if st.button(
-                        "Transcribe", key="mic_file_transcribe_btn", type="tertiary"
+                        "Transcribe", key=f"{key}_file_transcribe_btn", type="tertiary"
                     ):
                         file_to_transcript = file
                         if file_to_transcript is not None:
@@ -475,34 +408,36 @@ with mic_file_tab:
                                     "audio/wav",
                                 )
                             }
-                            params = {}
-                            params["lang"] = st.session_state.lang
+                            params = {
+                                "lang": st.session_state.lang,
+                                "exit": st.session_state.exit,
+                            }
                             resp = requests.post(
                                 "http://127.0.0.1:8000/uploads/",
                                 files=files,
                                 data=params,
                             )
-                            st.session_state["transcripted_text"] = resp.json()["text"]
+                            st.session_state["transcripted_text"] = resp.json()[
+                                "result"
+                            ]
                             st.session_state.is_transcripted = True
                         else:
                             st.error("Nulla da trascrivere")
 
             st.divider()
 
-            if file_to_transcript is not None and st.session_state.is_transcripted:
-                if st.session_state["exit"] == "All":
-                    for i in range(len(st.session_state["transcripted_text"])):
-                        st.write(
-                            f"Exit {i + 1}: " + st.session_state["transcripted_text"][i]
-                        )
-                else:
-                    chosen_idx = int(st.session_state["exit"]) - 1
-                    st.write(
-                        f"Exit {chosen_idx + 1}: "
-                        + st.session_state["transcripted_text"][chosen_idx]
-                    )
+            transc = st.session_state["transcripted_text"]
+            for t in transc:
+                st.write(f"Exit {t['exit'] + 1}: {t['text']}")
         else:
             st.warning("Load model from sidebar")
+
+
+with file_tab:
+    file_tab_fn(key="file")
+
+with mic_file_tab:
+    file_tab_fn(mic_mode=True, key="mic")
 
 
 # Credits
