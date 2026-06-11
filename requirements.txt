@@ -1,5 +1,5 @@
 streamlit==1.57.0
-streamlit-webrtc==0.70.0
+streamlit-webrtc
 fastapi[standard]
 torch>=2.2,<2.5
 torchaudio>=2.2,<2.5
