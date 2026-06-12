@@ -339,10 +339,14 @@ def handler_online(args, model, valid_len, inf, dev, conn, sock):
     sock.close()
 
 
-def handler_batch(args, model, valid_len, inf, dev, file: str, exit: int):
+def handler_batch(args, model, valid_len, inf, dev, file: str | bytes, exit: int):
+    if isinstance(file, str):
     # audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
     # waveform, sample_rate = torchaudio.load("/home/daniele/early-exit-transformer/2961-960-0000.flac")
-    waveform, sample_rate = torchaudio.load(file)
+        waveform, sample_rate = torchaudio.load(file)
+    else:
+        waveform, sample_rate = torchaudio.load(io.BytesIO(file))
+    
     # waveform, sample_rate = torchaudio.load("/home/daniele/early-exit-transformer/test_stream.wav")
 
     spec = spec_transform(waveform, args)  # .to(device)

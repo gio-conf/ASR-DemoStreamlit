@@ -24,9 +24,9 @@ from util.model_utils import *
 from util.tokenizer import *
 
 
-def load_audio(audio_bytes, target_sr=16000):
+def load_audio(audio_file: str, target_sr=16000):
 
-    waveform, sr = torchaudio.load(io.BytesIO(audio_bytes))
+    waveform, sr = torchaudio.load(audio_file)
 
     # stereo -> mono
     if waveform.size(0) > 1:
@@ -109,6 +109,8 @@ ALL_EXITS = 99
 async def upload(
     file: UploadFile = File(...), lang: str = Form("it"), exit: int = Form(5)
 ):
+    
+    
     dest = UPLOAD_DIR / file.filename
     with dest.open("wb") as out_file:
         while content := await file.read(1024 * 1024):
@@ -116,15 +118,28 @@ async def upload(
     await file.close()
     m = models[lang]
 
-    transc = handler_batch(
-        m.args,
-        m.model,
-        m.valid_len,
-        m.inf,
-        m.dev,
-        f"uploads/{file.filename}",
-        exit=exit,
-    )
+    if file.filename[-3:] == "wav":
+        transc = handler_batch(
+            m.args,
+            m.model,
+            m.valid_len,
+            m.inf,
+            m.dev,
+            f"uploads/{file.filename}",
+            exit=exit,
+        )
+    else:
+        audio_bytes = load_audio(f"uploads/{file.filename}")
+        transc = handler_batch(
+            m.args,
+            m.model,
+            m.valid_len,
+            m.inf,
+            m.dev,
+            audio_bytes,
+            exit=exit,
+        )
+        
 
     return {"result": transc}
 
