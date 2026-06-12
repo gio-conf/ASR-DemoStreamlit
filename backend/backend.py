@@ -112,8 +112,7 @@ ALL_EXITS = 99
 async def upload(
     file: UploadFile = File(...), lang: str = Form("it"), exit: int = Form(5)
 ):
-    
-    
+
     dest = UPLOAD_DIR / file.filename
     with dest.open("wb") as out_file:
         while content := await file.read(1024 * 1024):
@@ -142,7 +141,6 @@ async def upload(
             audio_bytes,
             exit=exit,
         )
-        
 
     return {"result": transc}
 
@@ -175,9 +173,9 @@ async def handle_chunk(
     session_id: str | None = Form(None),
     final: bool | None = Form(None),
     lang: str = Form("it"),
-    exit: int = Form(5),
 ):
-    global session_cnt
+    global session_cnt, exit
+    print(f"{exit=}")
     m = models[lang]
 
     s = sessions.get(session_id)

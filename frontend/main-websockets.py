@@ -13,7 +13,6 @@ from scipy.signal import resample
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
 from websockets.sync.client import ClientConnection, connect
 
-
 ####################################
 # Variables
 ####################################
@@ -30,9 +29,11 @@ if "transcripted_text" not in st.session_state:
 if "exit" not in st.session_state:
     st.session_state["exit"] = "All"
 if "rt_exit" not in st.session_state:
-    st.session_state["rt_exit"] = "All"    
+    st.session_state["rt_exit"] = (
+        int(st.session_state.exit) - 1 if st.session_state.exit != "All" else 99
+    )
 if "realtime_content" not in st.session_state:
-    st.session_state["realtime_content"] = [""] * 6
+    st.session_state.realtime_content = [""] * 6
 if "model_loaded" not in st.session_state:
     st.session_state["model_loaded"] = None
 if "audio_started" not in st.session_state:
@@ -201,14 +202,19 @@ with mic_rt_tab:
 
             if ctx.state.playing and not st.session_state["audio_started"]:
                 st.session_state.realtime_content = [""] * 6
-                st.session_state.rt_exit = int(st.session_state.exit) - 1 if st.session_state.exit != "All" else 99
+                st.session_state.rt_exit = (
+                    int(st.session_state.exit) - 1
+                    if st.session_state.exit != "All"
+                    else 99
+                )
                 st.session_state["audio_started"] = True
                 resp = requests.post(
                     "http://127.0.0.1:8000/model_specs/",
                     data={"lang": st.session_state.lang},
                 )
                 requests.post(
-                    "http://127.0.0.1:8000/set_exit/", data={"new_exit": st.session_state.rt_exit}
+                    "http://127.0.0.1:8000/set_exit/",
+                    data={"new_exit": st.session_state.rt_exit},
                 )
             st.divider()
 
@@ -221,7 +227,7 @@ with mic_rt_tab:
                 try:
                     resp_json = update_queue.get_nowait()
                     result = resp_json.get("result", [])
-                    print(f'{result=}')
+                    print(f"{result=}")
                     for r in result:
                         text = r["text"]
                         exit = r["exit"]
@@ -231,13 +237,19 @@ with mic_rt_tab:
 
                 if st.session_state.rt_exit == 99:
                     for i, hb in enumerate(history_boxes):
-                        hb.write(f"Exit {i+1}: {st.session_state['realtime_content'][i]}")
+                        hb.write(
+                            f"Exit {i + 1}: {st.session_state['realtime_content'][i]}"
+                        )
                 else:
-                    history_boxes[0].write(f"Exit {st.session_state.rt_exit + 1}: {st.session_state['realtime_content'][st.session_state.rt_exit]}")
+                    history_boxes[0].write(
+                        f"Exit {st.session_state.rt_exit + 1}: {st.session_state['realtime_content'][st.session_state.rt_exit]}"
+                    )
 
                 time.sleep(poll_interval)
 
             st.divider()
+
+            final_boxes = [st.empty() for _ in range(6)]
 
             try:
                 st.session_state["finished"] = finish_queue.get_nowait()
@@ -255,29 +267,36 @@ with mic_rt_tab:
                             text = r["text"]
                             exit = r["exit"]
                             st.session_state["realtime_content"][exit] += text
-                        
+
                             for i in range(len(st.session_state.realtime_content)):
-                                st.session_state.realtime_content[i] += (
-                                    text + " "
-                                )
-                                st.write(
+                                st.session_state.realtime_content[i] += text + " "
+                                final_boxes[i].write(
                                     f"Exit {i + 1}: {st.session_state.realtime_content[i]}"
                                 )
                     else:
-                        st.session_state.realtime_content[st.session_state.rt_exit] += result[0]["text"] + " "
-                        st.write(
+                        st.session_state.realtime_content[st.session_state.rt_exit] += (
+                            result[0]["text"] + " "
+                        )
+                        final_boxes[0].write(
                             f"Exit {st.session_state.rt_exit + 1}: {st.session_state.realtime_content[st.session_state.rt_exit]}"
                         )
                 except queue.Empty:
-                    if st.session_state.rt_exit == 99:
-                        for i in range(6):
-                            st.write(f"Exit {i+1}: {st.session_state.realtime_content[i]}")
-                    else:
-                        # Startup bug
-                        if st.session_state.rt_exit == "All":
-                            pass
-                        else:
-                            st.write(f"Exit {int(st.session_state.rt_exit)+1}: {st.session_state.realtime_content[st.session_state.rt_exit]}")
+                    pass
+
+            if st.session_state.exit == "All":
+                for i in range(len(st.session_state.realtime_content)):
+                    final_boxes[i].write(
+                        f"Exit {i + 1}: {st.session_state.realtime_content[i]}"
+                    )
+            else:
+                st.session_state.rt_exit = (
+                    int(st.session_state.exit) - 1
+                    if st.session_state.exit != "All"
+                    else 99
+                )
+                final_boxes[0].write(
+                    f"Exit {int(st.session_state.rt_exit) + 1}: {st.session_state.realtime_content[st.session_state.rt_exit]}"
+                )
         else:
             st.warning("Load model from sidebar")
 
