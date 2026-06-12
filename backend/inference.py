@@ -245,6 +245,18 @@ def handler(
                                 "text": normalize_output(inf.ctc_predict_(encoder[i])),
                             }
                         )
+            else:
+                # CUDA
+                for i in range(len(encoder)):
+                    if exit == i or exit == ALL_EXITS:
+                        best_combined = inf.ctc_cuda_predict(encoder[i], args.tokens)
+                        text = args.sp.decode(best_combined[0][0].tokens).lower()
+                        transc.append(
+                            {
+                                "exit": i,
+                                "text": normalize_output(text),
+                            }
+                        )
 
         inf.stream_decoder(partial=False)
         return transc, np.zeros(0, dtype=np.float32)
@@ -275,11 +287,19 @@ def handler(
                         }
                     )
 
-        # TODO: cuda with multiple exits
-        if dev == "cuda":
-            best_combined = inf.ctc_cuda_predict(encoder[5], args.tokens)
-            transc = args.sp.decode(best_combined[0][0].tokens).lower()
+        else:
+            for i in range(len(encoder)):
+                if exit == i or exit == ALL_EXITS:
+                    best_combined = inf.ctc_cuda_predict(encoder[i], args.tokens)
+                    text = args.sp.decode(best_combined[0][0].tokens).lower()
 
+                    transc.append(
+                        {
+                            "exit": i,
+                            "text": normalize_output(text),
+                        }
+                    )
+            
     return transc, buffer
 
     """
