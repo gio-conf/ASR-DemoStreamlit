@@ -14,24 +14,6 @@ from streamlit_webrtc import WebRtcMode, webrtc_streamer
 from websockets.sync.client import ClientConnection, connect
 
 
-class SharedConfig:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._target_length_ms = 500
-
-    def set_target_length(self, value):
-        with self._lock:
-            self._target_length_ms = value
-
-    def get_target_length(self):
-        with self._lock:
-            return self._target_length_ms
-
-
-# To fix, right now config._target_length_ms is always 500 because streamlit reruns the whole script every time and 500 is default val
-config = SharedConfig()
-
-
 ####################################
 # Variables
 ####################################
@@ -168,10 +150,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-####################################
-# Functions
-####################################
-
 # UI
 st.title("Transcriber")
 
@@ -208,16 +186,6 @@ with mic_rt_tab:
 
             st.divider()
             with st.container(horizontal=True, horizontal_alignment="distribute"):
-                new_length = st.number_input(
-                    "Target buffer length in ms",
-                    min_value=200,
-                    max_value=1000,
-                    value=config.get_target_length(),
-                    step=40,
-                )
-
-                config.set_target_length(new_length)
-
                 st.session_state.lang = st.selectbox(
                     "Seleziona lingua",
                     key="mic_rt_chosen_lang",
@@ -305,13 +273,16 @@ with mic_rt_tab:
                         for i in range(6):
                             st.write(f"Exit {i+1}: {st.session_state.realtime_content[i]}")
                     else:
-                        st.write(f"Exit {st.session_state.rt_exit+1}: {st.session_state.realtime_content[st.session_state.rt_exit]}")
+                        # Startup bug
+                        if st.session_state.rt_exit == "All":
+                            pass
+                        else:
+                            st.write(f"Exit {int(st.session_state.rt_exit)+1}: {st.session_state.realtime_content[st.session_state.rt_exit]}")
         else:
             st.warning("Load model from sidebar")
 
 
 def file_tab_fn(mic_mode=False, key=""):
-
     with st.container(
         border=True, height="stretch", width="stretch", horizontal_alignment="center"
     ):
