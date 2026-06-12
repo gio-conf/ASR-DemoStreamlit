@@ -71,7 +71,10 @@ async def lifespan(app: FastAPI):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     for lang in ["it", "en"]:
-        args = get_args([], "Italian")
+        if lang == "it":
+            args = get_args([], "Italian")
+        else:
+            args = get_args([], "English")
         model, inf, valid_len, dev = await load_model(args)
         print(f"{lang}-model loaded")
         models[lang] = Model(args, model, inf, valid_len, dev)
